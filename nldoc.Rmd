@@ -1,0 +1,146 @@
+---
+title: "Netlogo nldoc framework"
+output: html_notebook
+---
+
+## Introduction
+
+This repository serves as an example showcase on how the nldoc framework (nldoc and nlrx) can be used for reproducible research with NetLogo and R.
+The main idea behind the framework ist to have everything related to the NetLogo model, model documentation and analysis in one place.
+
+## Model Documentation
+
+#### Documentation of code, gui, info tab and behavior space experiments:
+
+Model documentation can be created with nldoc package.
+
+```{r, message=FALSE, warning=FALSE, results=FALSE}
+library(nldoc)
+## Test nldoc creation:
+modelfiles <- c("D:/owncloud/Rdev/nldoc_testpackage/Wolf Sheep Predation.nlogo",
+                "D:/owncloud/Rdev/nldoc_testpackage/Wolf Sheep Predation Extra.nls")
+nldoc(modelfiles = modelfiles,
+      infotab=TRUE,
+      gui=TRUE,
+      bs=TRUE,
+      outpath = "D:/owncloud/Rdev/nldoc_testpackage/nldoc_framework",
+      output_format = "html",
+      number_sections = TRUE,
+      theme = "cosmo",
+      date = date(),
+      toc = TRUE)
+```
+
+[Open Model Documentation here](http://htmlpreview.github.com/?https://raw.githubusercontent.com/nldoc/nldoc_framework/master/nldoc.html)
+
+</br>
+</br>
+
+#### Documentation of model procedure network
+
+Nldoc also has a function to generate a procedure network plot:
+
+```{r, message=FALSE, warning=FALSE}
+# Read procedure network from modelfiles (nldoc)
+nw <- procedure_nw(modelfiles)
+library(igraph)
+clp <- walktrap.community(nw)
+V(nw)$community <- clp$membership
+rain <- rainbow(14, alpha=.5)
+V(nw)$color <- rain[V(nw)$community]
+# Plot procedure graph:
+plot(nw,
+     edge.arrow.size=1,
+     vertex.label.color="black",
+     vertex.label.dist=2,
+     vertex.size=10,
+     edge.curved=0,
+     vertex.label.cex=1,
+     layout=layout_with_fr(nw, niter = 2000))
+```
+
+## Simulations
+
+#### Experiment setup:
+
+We use the nlrx package to run a simple model analysis.
+We want to know, how the grass regrowth time affects the number of sheep and wolves over time.
+To setup the simulations, we load the nlrx package.
+We then create a nl object and an experiment with parameter definitions.
+Finally, we attach a distinct simdesign.
+
+```{r}
+library(nlrx)
+## Step1: Create a nl obejct:
+nl <- nl(nlversion = "6.0.4",
+         nlpath = "C:/Program Files/NetLogo 6.0.4",
+         modelpath = modelfiles[1],
+         jvmmem = 1024)
+## Step2: Add Experiment
+# Inspect the model available model parameters:
+eval_variables_constants(nl)
+nl@experiment <- experiment(expname = "eFast",
+                            outpath = "C:/out",
+                            repetition = 1,      # If repetitions is > 1, a different random seed will be set for each netlogo run
+                            tickmetrics = "true",
+                            idsetup = "setup",   # you can define multiple setup procedures with c()
+                            idgo = "go",         # you can define multiple go procedures with c()
+                            idfinal = NA_character_,  # you can define one or more final commands here
+                            runtime = 100,
+                            evalticks = seq(0,100),
+                            metrics = c("count sheep", "count wolves"),
+                            variables = list("grass-regrowth-time" = list(values=c(10, 20, 30, 40, 50, 60, 70, 80))
+                            ),
+                            constants = list("initial-number-sheep" = 100,
+                                             "initial-number-wolves" = 50,
+                                             "sheep-gain-from-food" = 4,
+                                             "wolf-gain-from-food" = 20,
+                                             "sheep-reproduce" = 4,
+                                             "wolf-reproduce" = 5,
+                                             "model-version" = "\"sheep-wolves-grass\"",
+                                             "show-energy?" = "false")
+)
+nl@simdesign <- simdesign_distinct(nl=nl, nseeds=3)
+```
+
+#### Execution of simulation
+We can now run the simulations in parallel:
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+## Run parallel
+library(future)
+plan(multisession)
+results <- nlrx::run_nl_all(nl = nl,
+                            split = 1,
+                            cleanup = "all")
+# Attach results to nl
+setsim(nl, "simoutput") <- results
+# Store nl object
+saveRDS(nl, "wolfsheep_sim_nl.rds")
+```
+
+#### Postprocessing
+
+We can now plot the results.
+Plot 1 shows the number of sheep in dependence of the grass-regrowth-time and 3 replications with different random-seeds.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Plot number of sheep
+library(ggplot2)
+nl@simdesign@simoutput %>% 
+ggplot(aes(x=`[step]`, y=`count sheep`, color=`grass-regrowth-time`, shape=factor(`random-seed`))) +
+  geom_point(size=1) +
+  scale_color_viridis_c() +
+  theme_minimal()
+```
+
+Plot 1 shows the number of wolves in dependence of the grass-regrowth-time and 3 replications with different random-seeds.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Plot number of wolves:
+nl@simdesign@simoutput %>% 
+ggplot(aes(x=`[step]`, y=`count wolves`, color=`grass-regrowth-time`, shape=factor(`random-seed`))) +
+  geom_point(size=1) +
+  scale_color_viridis_c() +
+  theme_minimal()
+```
